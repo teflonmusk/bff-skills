@@ -1,79 +1,99 @@
 ---
-name: "hodlmm-inscription-signal"
-version: "1.0.0"
-description: "Bitcoin L1 inscription pressure oracle for HODLMM bin management. Monitors inscription volume and mempool fee rates to recommend HOLD, TIGHTEN_BINS, or WIDEN_BINS."
-author: "Dual Cougar"
-category: "defi"
-tags: "hodlmm", "bitflow", "bitcoin", "inscriptions", "ordinals", "liquidity", "bins", "mempool", "sbtc"
-chain: "stacks"
-cost: "free"
-output: "json"
-command: "bun skills/hodlmm-inscription-signal/skill.ts --pool=sbtc-stx"
-user-invocable: "false"
+name: hodlmm-inscription-signal
+description: "Bitcoin L1 inscription pressure oracle for HODLMM bin management. Monitors inscription volume and mempool fee rates to recommend HOLD, TIGHTEN_BINS, or WIDEN_BINS for HODLMM liquidity providers."
+metadata:
+  author: "teflonmusk"
+  author-agent: "Dual Cougar"
+  user-invocable: "false"
+  arguments: "doctor | run"
+  entry: "hodlmm-inscription-signal/hodlmm-inscription-signal.ts"
+  requires: ""
+  tags: "l1, l2, defi, read-only, mainnet-only, infrastructure"
 ---
 
 # hodlmm-inscription-signal
 
-A real-time inscription pressure oracle that helps HODLMM liquidity providers know when to tighten, widen, or hold their concentrated liquidity bins. Monitors Bitcoin L1 inscription activity and mempool fee rates, cross-references live HODLMM pool state, and outputs an actionable bin management signal.
+## What it does
+Monitors Bitcoin L1 inscription activity and mempool fee rates, cross-references live Bitflow HODLMM pool state, and outputs a pressure score (0–10) with an actionable bin management signal: HOLD, TIGHTEN_BINS, or WIDEN_BINS.
 
-## Why it matters
+## Why agents need it
+HODLMM concentrated liquidity bins are most efficient when positioned around current price. Bitcoin L1 inscription waves and fee spikes cause sBTC demand surges that shift the sBTC/STX price. Agents managing HODLMM positions need a structured pre-flight signal before volatility moves — this skill provides it.
 
-HODLMM concentrated liquidity bins are most efficient when positioned around current price. But Bitcoin L1 activity — inscription waves, Runes mints, fee spikes — causes sBTC demand surges that shift the sBTC/STX price. Reacting too slow means fees collected outside your bin. This skill gives LPs a structured, data-driven signal before volatility moves.
+## Safety notes
+- Read-only — never writes to chain or moves funds.
+- No wallet or funds required.
+- Mainnet only — Bitflow HODLMM APIs are mainnet-only.
+- Output is advisory only — parent agent must confirm before executing any bin adjustment.
 
-## Usage
+## Commands
 
+### doctor
+Checks that Hiro and Bitflow APIs are reachable. Safe to run anytime.
 ```bash
-# Default: sbtc-stx pool, threshold 3, 1-hour window
-bun skills/hodlmm-inscription-signal/skill.ts
-
-# Custom pool and sensitivity
-bun skills/hodlmm-inscription-signal/skill.ts --pool=sbtc-stx --threshold=5 --window=2
+bun run hodlmm-inscription-signal/hodlmm-inscription-signal.ts doctor
 ```
 
-## Parameters
+Output:
+```json
+{
+  "result": "ready",
+  "checks": { "hiro_api": "ok", "bitflow_api": "ok" }
+}
+```
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `--pool` | string | `sbtc-stx` | HODLMM pool ID to analyze |
-| `--threshold` | number | `3` | Pressure score (0–10) to trigger TIGHTEN_BINS |
-| `--window` | number | `1` | Hours of inscription history to analyze |
+### run
+Fetches live inscription count, mempool fee rate, and HODLMM pool state. Computes pressure score and outputs bin recommendation.
+```bash
+bun run hodlmm-inscription-signal/hodlmm-inscription-signal.ts run --pool sbtc-stx
+bun run hodlmm-inscription-signal/hodlmm-inscription-signal.ts run --pool sbtc-stx --threshold 5 --window 2
+```
 
-## Output
+Options:
+- `--pool` (default: `sbtc-stx`) — HODLMM pool ID to analyze
+- `--threshold` (default: `3`) — Pressure score to trigger TIGHTEN_BINS (0–10)
+- `--window` (default: `1`) — Hours of inscription history to analyze
 
+Output:
 ```json
 {
   "skill": "hodlmm-inscription-signal",
-  "timestamp": "2026-03-28T15:00:00.000Z",
+  "timestamp": "2026-03-28T15:16:01.048Z",
   "input": { "pool": "sbtc-stx", "threshold": 3, "window_hours": 1 },
   "bitcoin_l1": {
-    "inscriptions_last_hour": 42,
-    "fee_rate_sat_vb": 28,
-    "pressure_score": 5
+    "inscriptions_last_hour": 0,
+    "fee_rate_sat_vb": 10,
+    "pressure_score": 0
   },
-  "pool": {
-    "id": "sbtc-stx",
-    "pair": "sBTC/STX",
-    "tvl_usd": 1200000,
-    "volume_24h": 85000,
-    "fee_rate": 0.003,
-    "current_price": 94200
-  },
-  "recommendation": "TIGHTEN_BINS",
-  "rationale": "Moderate pressure detected (score 5/10). Inscription activity is elevated — tightening bins captures more fees while staying ahead of volatility.",
-  "summary": "TIGHTEN_BINS — Inscription pressure score 5/10. 42 inscriptions in last 1h at ~28 sat/vB. Pool sbtc-stx: $1,200,000 TVL."
+  "pool": null,
+  "recommendation": "HOLD",
+  "rationale": "Low inscription and fee pressure (score 0/10). L1 is calm — current bin configuration is optimal. Hold and collect fees.",
+  "summary": "HOLD — Inscription pressure score 0/10. 0 inscriptions in last 1h at ~10 sat/vB."
 }
 ```
 
 ## Recommendation logic
 
-| Pressure score | Recommendation | Action |
+| Pressure score | Recommendation | When to act |
 |---|---|---|
 | < threshold | `HOLD` | Bins optimally positioned — collect fees |
 | ≥ threshold | `TIGHTEN_BINS` | Moderate L1 activity — concentrate range |
 | ≥ threshold + 3 | `WIDEN_BINS` | Extreme volatility risk — widen to avoid IL |
 
-## Chaining
+## Output contract
+All outputs are JSON to stdout.
 
-- Run before adjusting HODLMM position — treat as pre-flight check
-- Feed `recommendation` into bin adjustment execution when automation is available
-- Combine with `fee-weather` for full Stacks + Bitcoin network picture
+**Success:**
+```json
+{ "result": "ready" }
+```
+
+**Error:**
+```json
+{ "error": "descriptive message" }
+```
+
+## Known constraints
+- Mainnet only — Bitflow pool APIs do not exist on testnet.
+- Bitflow pool fetch failure is handled gracefully — recommendation still valid from L1 signals alone.
+- Pressure score is a current-state proxy, not historical realized volatility.
+- No wallet required — all operations are read-only.
