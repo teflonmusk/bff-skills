@@ -75,17 +75,20 @@ async function fetchJson<T>(url: string): Promise<T> {
 // ---------------------------------------------------------------------------
 
 interface L1Pressure {
-  inscriptions_last_hour: number;
+  inscriptions_recent: number; // count in last windowHours; 0 if ordinals API unavailable
   fee_rate_sat_vb: number;
   pressure_score: number; // 0–10
 }
 
 async function getL1Pressure(windowHours: number): Promise<L1Pressure> {
-  const since = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+  // Note: Hiro v1 Ordinals API was deprecated 2026-03-09. We try the v2 endpoint;
+  // if unavailable, inscriptions_recent defaults to 0 (score contribution zeroed).
+  // Fee rate endpoint (/extended/v1/fees/mempool) is unaffected by the deprecation.
+  const after = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 
   const [inscrData, feeData] = await Promise.allSettled([
-    fetchJson<{ results: unknown[] }>(
-      `${HIRO_API}/ordinals/v1/inscriptions?limit=60&order=desc&order_by=genesis_block_height`
+    fetchJson<{ results: unknown[]; total: number }>(
+      `${HIRO_API}/ordinals/v2/inscriptions?limit=60&order=desc&after_genesis_timestamp=${encodeURIComponent(after)}`
     ),
     fetchJson<{ percentiles: number[] }>(`${HIRO_API}/extended/v1/fees/mempool`),
   ]);
@@ -103,7 +106,7 @@ async function getL1Pressure(windowHours: number): Promise<L1Pressure> {
   const feeScore = feeRate >= 50 ? 4 : feeRate >= 30 ? 3 : feeRate >= 15 ? 2 : feeRate >= 5 ? 1 : 0;
   const pressure_score = Math.min(10, inscrScore + feeScore);
 
-  return { inscriptions_last_hour: inscriptions, fee_rate_sat_vb: feeRate, pressure_score };
+  return { inscriptions_recent: inscriptions, fee_rate_sat_vb: feeRate, pressure_score };
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +136,13 @@ function computeReserveAndVolatility(
   demandThreshold: number
 ): ReserveAndVolatility {
   const activeBinId = binsData.active_bin_id ?? poolInfo.active_bin;
+
+  if (!activeBinId) {
+    throw new Error(
+      `Could not determine active bin for pool — API response missing active_bin_id and pool info missing active_bin`
+    );
+  }
+
   const bins = binsData.bins;
 
   let sbtcAbove = 0;
@@ -146,11 +156,12 @@ function computeReserveAndVolatility(
   }
 
   // Demand: bin-count imbalance score 0–10
+  // Use strict inequalities so active bin is excluded from directional scoring
   const totalSbtcSide = bins.filter(
-    (b) => b.bin_id >= activeBinId && parseFloat(b.reserve_x) > 0
+    (b) => b.bin_id > activeBinId && parseFloat(b.reserve_x) > 0
   ).length;
   const totalStxSide = bins.filter(
-    (b) => b.bin_id <= activeBinId && parseFloat(b.reserve_y) > 0
+    (b) => b.bin_id < activeBinId && parseFloat(b.reserve_y) > 0
   ).length;
   const totalBinCount = totalSbtcSide + totalStxSide || 1;
   const imbalance_score = sbtcAbove + stxBelow > 0
@@ -171,18 +182,11 @@ function computeReserveAndVolatility(
   const totalBins = bins.length;
   const bin_spread = totalBins > 1 ? (maxBin - minBin) / totalBins : 0;
 
-  // Reserve imbalance ratio
-  const activeBin = bins.find((b) => b.bin_id === activeBinId);
-  const reserveX = sbtcAbove + parseFloat(activeBin?.reserve_x ?? "0");
-  const reserveY = stxBelow + parseFloat(activeBin?.reserve_y ?? "0");
-  const totalReserve = reserveX + reserveY;
-  const reserveImbalanceRatio = totalReserve > 0
-    ? Math.abs(reserveX - reserveY) / totalReserve
-    : 0;
-
   // Volatility score 0–100 (weights: spread 40%, imbalance 30%, concentration 30%)
+  // Imbalance is derived from bin counts (unit-independent: avoids mixing raw sBTC and STX amounts)
   const spreadScore = Math.min(100, Math.round(bin_spread * 1000));
-  const imbalanceScore100 = Math.round(reserveImbalanceRatio * 100);
+  // imbalance_score is 0–10 centered at 5; map distance from center to 0–100
+  const imbalanceScore100 = Math.round(Math.abs(imbalance_score - 5) / 5 * 100);
   const concentrationBins = bins.filter(
     (b) => parseFloat(b.reserve_x) > 0 || parseFloat(b.reserve_y) > 0
   ).length;
@@ -346,7 +350,7 @@ async function runAnalysis(poolId: string, demandThreshold: number): Promise<voi
     },
     signals: {
       l1_pressure: {
-        inscriptions_last_hour: l1.inscriptions_last_hour,
+        inscriptions_recent: l1.inscriptions_recent,
         fee_rate_sat_vb: l1.fee_rate_sat_vb,
         pressure_score: l1.pressure_score,
       },
@@ -389,8 +393,8 @@ async function main(): Promise<void> {
     .action(async () => {
       try {
         await runDoctor();
-      } catch (err: any) {
-        console.log(JSON.stringify({ error: err.message }));
+      } catch (err) {
+        console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
         process.exit(1);
       }
     });
@@ -409,11 +413,11 @@ async function main(): Promise<void> {
       const threshold = Math.max(1, Math.min(4, parseInt(opts.threshold, 10)));
       try {
         await runAnalysis(poolId, threshold);
-      } catch (err: any) {
+      } catch (err) {
         console.log(
           JSON.stringify({
             skill: "hodlmm-advisor",
-            error: err.message,
+            error: err instanceof Error ? err.message : String(err),
             timestamp: new Date().toISOString(),
           })
         );
