@@ -118,10 +118,10 @@ function computeMetrics(
     // We can't convert directly without price, so use bin count weighting:
     // count bins that are sBTC-dominated vs STX-dominated
     const sbtcBins = bins.filter(
-      (b) => b.bin_id >= activeBinId && parseFloat(b.reserve_x) > 0
+      (b) => b.bin_id > activeBinId && parseFloat(b.reserve_x) > 0
     ).length;
     const stxBins = bins.filter(
-      (b) => b.bin_id <= activeBinId && parseFloat(b.reserve_y) > 0
+      (b) => b.bin_id < activeBinId && parseFloat(b.reserve_y) > 0
     ).length;
     const total = sbtcBins + stxBins || 1;
     imbalanceScore = Math.round((sbtcBins / total) * 10);
@@ -146,8 +146,8 @@ function computeMetrics(
 }
 
 function deriveSignal(score: number, threshold: number): DemandSignal {
-  // score 0–4: STX-heavy → price trended up → BUY_PRESSURE continues
-  // score 6–10: sBTC-heavy → price trended down → SELL_PRESSURE continues
+  // score ≤ (5 - threshold): STX-heavy → BUY_PRESSURE
+  // score ≥ (5 + threshold): sBTC-heavy → SELL_PRESSURE
   const midLow = 5 - threshold;
   const midHigh = 5 + threshold;
   if (score <= midLow) return "BUY_PRESSURE";
@@ -162,13 +162,14 @@ function buildRationale(
   stxBelow: number,
   activeBin: number
 ): string {
+  const reserves = `(${sbtcAbove.toFixed(6)} sBTC above vs ${Math.round(stxBelow).toLocaleString()} STX below active bin ${activeBin})`;
   switch (signal) {
     case "BUY_PRESSURE":
-      return `Pool is STX-heavy (imbalance score ${score}/10). More bins below active bin ${activeBin} hold STX depth than sBTC supply sits above — price has been trending up as buyers consume sBTC. Upward momentum may continue.`;
+      return `Pool is STX-heavy (imbalance score ${score}/10) ${reserves}. More bins below active price hold STX depth than sBTC supply sits above — price has been trending up as buyers consume sBTC. Upward momentum may continue.`;
     case "SELL_PRESSURE":
-      return `Pool is sBTC-heavy (imbalance score ${score}/10). More sBTC supply is stacked above active bin ${activeBin} than STX depth sits below — price has been trending down as sellers offload sBTC. Downward momentum may continue.`;
+      return `Pool is sBTC-heavy (imbalance score ${score}/10) ${reserves}. More sBTC supply is stacked above active price than STX depth sits below — price has been trending down as sellers offload sBTC. Downward momentum may continue.`;
     case "NEUTRAL":
-      return `Pool reserves are balanced (imbalance score ${score}/10). sBTC supply above and STX depth below active bin ${activeBin} are roughly symmetric — no dominant directional momentum detected.`;
+      return `Pool reserves are balanced (imbalance score ${score}/10) ${reserves}. sBTC supply above and STX depth below are roughly symmetric — no dominant directional momentum detected.`;
   }
 }
 
@@ -188,8 +189,8 @@ function buildShiftRec(signal: DemandSignal): string {
 // ---------------------------------------------------------------------------
 
 async function runDoctor(): Promise<void> {
-  const bitflowOk = await fetch(`${BITFLOW_V1}/hodlmm/pools/dlmm_3`)
-    .then((r) => r.ok)
+  const bitflowOk = await fetchJson<unknown>(`${BITFLOW_V1}/hodlmm/pools/dlmm_3`)
+    .then(() => true)
     .catch(() => false);
 
   const result = {
@@ -213,6 +214,12 @@ async function runAnalysis(poolId: string, threshold: number): Promise<void> {
 
   const activeBinId =
     binsData.active_bin_id ?? poolInfo.active_bin;
+
+  if (!activeBinId) {
+    throw new Error(
+      `Could not determine active bin for pool ${poolId} — API response missing active_bin_id and pool info missing active_bin`
+    );
+  }
 
   const metrics = computeMetrics(binsData.bins, activeBinId, threshold);
 
@@ -261,8 +268,8 @@ async function main(): Promise<void> {
     .action(async () => {
       try {
         await runDoctor();
-      } catch (err: any) {
-        console.log(JSON.stringify({ error: err.message }));
+      } catch (err) {
+        console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
         process.exit(1);
       }
     });
@@ -281,11 +288,11 @@ async function main(): Promise<void> {
       const threshold = Math.max(1, Math.min(4, parseInt(opts.threshold, 10)));
       try {
         await runAnalysis(poolId, threshold);
-      } catch (err: any) {
+      } catch (err) {
         console.log(
           JSON.stringify({
             skill: "sbtc-demand-signal",
-            error: err.message,
+            error: err instanceof Error ? err.message : String(err),
             timestamp: new Date().toISOString(),
           })
         );
