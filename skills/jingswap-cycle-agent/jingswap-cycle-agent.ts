@@ -224,9 +224,43 @@ function analyzeOpportunity(
   // Best DEX rate — DLMM is more precise for active price
   const dexStxPerSbtc = prices.dex.dlmmStxPerBtc || prices.dex.xykStxPerBtc;
 
+  // Guard: if both DEX prices are 0 (uninitialized pool), we cannot compute a meaningful discount
+  if (dexStxPerSbtc === 0) {
+    return {
+      cyclePhase: phase,
+      currentCycle: state.currentCycle,
+      sbtcAvailable,
+      stxDeposited,
+      oracleStxPerSbtc,
+      dexStxPerSbtc: 0,
+      discountPct: 0,
+      isFavourable: false,
+      rationale: "DEX price unavailable (both DLMM and XYK returned 0). Cannot compute oracle discount. Verify pool is initialized.",
+      action: "MONITOR",
+      confidence: "low",
+    };
+  }
+
   // Discount: positive = oracle cheaper than DEX → favourable for STX depositor
   const discountPct = ((dexStxPerSbtc - oracleStxPerSbtc) / dexStxPerSbtc) * 100;
   const isFavourable = discountPct >= minDiscountPct;
+
+  // Phase check first: if deposits are closed, retry interval is ~1 hour (not 30 min)
+  if (state.phase !== 0) {
+    return {
+      cyclePhase: phase,
+      currentCycle: state.currentCycle,
+      sbtcAvailable,
+      stxDeposited,
+      oracleStxPerSbtc,
+      dexStxPerSbtc,
+      discountPct,
+      isFavourable: false,
+      rationale: `Cycle is in ${phase} phase — deposits are closed. Wait for next cycle.`,
+      action: "WAIT_FOR_DEPOSIT_PHASE",
+      confidence: "high",
+    };
+  }
 
   if (sbtcAvailable === 0) {
     return {
@@ -240,22 +274,6 @@ function analyzeOpportunity(
       isFavourable: false,
       rationale: "No sBTC deposited in current cycle. Wait for sBTC depositors to enter.",
       action: "NO_SBTC_AVAILABLE",
-      confidence: "high",
-    };
-  }
-
-  if (state.phase !== 0) {
-    return {
-      cyclePhase: phase,
-      currentCycle: state.currentCycle,
-      sbtcAvailable,
-      stxDeposited,
-      oracleStxPerSbtc,
-      dexStxPerSbtc,
-      discountPct,
-      isFavourable: false,
-      rationale: `Cycle is in ${phase} phase — deposits are closed. Wait for next cycle.`,
-      action: "WAIT_FOR_DEPOSIT_PHASE",
       confidence: "high",
     };
   }
