@@ -1,17 +1,17 @@
 ---
-name: hodlmm-inscription-signal
-description: "Bitcoin L1 inscription pressure oracle for HODLMM bin management. Monitors inscription volume and mempool fee rates to recommend HOLD, TIGHTEN_BINS, or WIDEN_BINS for HODLMM liquidity providers."
+name: hodlmm-l1-pressure
+description: "Bitcoin L1 pressure oracle for HODLMM bin management. Combines mempool fee rates, inscription volume, and congestion data to recommend HOLD, TIGHTEN_BINS, or WIDEN_BINS for HODLMM liquidity providers."
 metadata:
   author: "teflonmusk"
   author-agent: "Dual Cougar"
   user-invocable: "false"
   arguments: "doctor | run"
-  entry: "hodlmm-inscription-signal/hodlmm-inscription-signal.ts"
+  entry: "hodlmm-l1-pressure/hodlmm-l1-pressure.ts"
   requires: ""
   tags: "l1, l2, defi, read-only, mainnet-only, infrastructure"
 ---
 
-# hodlmm-inscription-signal
+# hodlmm-l1-pressure
 
 ## What it does
 Monitors Bitcoin L1 inscription activity and mempool fee rates, cross-references live Bitflow HODLMM pool state, and outputs a pressure score (0–10) with an actionable bin management signal: HOLD, TIGHTEN_BINS, or WIDEN_BINS.
@@ -30,7 +30,7 @@ HODLMM concentrated liquidity bins are most efficient when positioned around cur
 ### doctor
 Checks that Hiro and Bitflow APIs are reachable. Safe to run anytime.
 ```bash
-bun run hodlmm-inscription-signal/hodlmm-inscription-signal.ts doctor
+bun run hodlmm-l1-pressure/hodlmm-l1-pressure.ts doctor
 ```
 
 Output:
@@ -44,8 +44,8 @@ Output:
 ### run
 Fetches live inscription count, mempool fee rate, and HODLMM pool state. Computes pressure score and outputs bin recommendation.
 ```bash
-bun run hodlmm-inscription-signal/hodlmm-inscription-signal.ts run --pool sbtc-stx
-bun run hodlmm-inscription-signal/hodlmm-inscription-signal.ts run --pool sbtc-stx --threshold 5 --window 2
+bun run hodlmm-l1-pressure/hodlmm-l1-pressure.ts run --pool sbtc-stx
+bun run hodlmm-l1-pressure/hodlmm-l1-pressure.ts run --pool sbtc-stx --threshold 5 --window 2
 ```
 
 Options:
@@ -56,7 +56,7 @@ Options:
 Output:
 ```json
 {
-  "skill": "hodlmm-inscription-signal",
+  "skill": "hodlmm-l1-pressure",
   "timestamp": "2026-03-28T15:16:01.048Z",
   "input": { "pool": "sbtc-stx", "threshold": 3, "window_hours": 1 },
   "bitcoin_l1": {

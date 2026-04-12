@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * hodlmm-inscription-signal — Bitcoin L1 inscription pressure oracle for HODLMM bin management
+ * hodlmm-l1-pressure — Bitcoin L1 inscription pressure oracle for HODLMM bin management
  * Monitors BTC inscription activity, mempool fee rates, and HODLMM bin state to recommend
  * when HODLMM LPs should tighten, widen, or hold their concentrated liquidity bins.
- * Usage: bun hodlmm-inscription-signal/hodlmm-inscription-signal.ts doctor | run [options]
+ * Usage: bun hodlmm-l1-pressure/hodlmm-l1-pressure.ts doctor | run [options]
  */
 
 import { Command } from "commander";
@@ -166,7 +166,7 @@ function describeRationale(rec: BinRecommendation, p: MempoolPressure): string {
 
 const program = new Command();
 program
-  .name("hodlmm-inscription-signal")
+  .name("hodlmm-l1-pressure")
   .description("Bitcoin L1 inscription pressure oracle for HODLMM bin management")
   .version("1.1.0");
 
@@ -211,7 +211,7 @@ program
       const recommendation = recommendBins(pressure.pressure_score, threshold);
       const rationale = describeRationale(recommendation, pressure);
       console.log(JSON.stringify({
-        skill: "hodlmm-inscription-signal",
+        skill: "hodlmm-l1-pressure",
         timestamp,
         input: { pool: poolId, threshold, window_hours: window },
         bitcoin_l1: {
@@ -244,7 +244,7 @@ program
         summary: `${recommendation} — L1 pressure score ${pressure.pressure_score}/10. ${pressure.inscriptions_last_hour} inscriptions/hr, ${pressure.fastest_fee_sat_vb} sat/vB.${binState ? ` Active bin ${binState.active_bin_id}, ${binState.total_bins} bins (${binState.bins_below_active} below / ${binState.bins_above_active} above).` : ""}`,
       }, null, 2));
     } catch (err: any) {
-      console.log(JSON.stringify({ skill: "hodlmm-inscription-signal", error: err.message, timestamp }));
+      console.log(JSON.stringify({ skill: "hodlmm-l1-pressure", error: err.message, timestamp }));
       process.exit(1);
     }
   });

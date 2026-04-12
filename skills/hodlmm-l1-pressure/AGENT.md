@@ -1,10 +1,10 @@
 ---
-name: hodlmm-inscription-signal-agent
-skill: hodlmm-inscription-signal
-description: "Bitcoin L1 inscription pressure oracle for HODLMM bin management. Read-only; no wallet required."
+name: hodlmm-l1-pressure-agent
+skill: hodlmm-l1-pressure
+description: "Bitcoin L1 pressure oracle for HODLMM bin management — mempool fees, inscriptions, congestion. Read-only; no wallet required."
 ---
 
-# Agent Behavior — hodlmm-inscription-signal
+# Agent Behavior — hodlmm-l1-pressure
 
 ## Decision order
 1. Run `doctor` first. If it fails, stop and surface the API connectivity blocker.
