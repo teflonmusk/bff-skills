@@ -1,17 +1,17 @@
 ---
-name: hodlmm-il-tracker
+name: hodlmm-position-tracker
 description: "Impermanent loss tracker for Bitflow HODLMM concentrated liquidity. Calculates standard and concentrated IL, compares LP vs HODL value, tracks range drift and reserve imbalance."
 metadata:
   author: "teflonmusk"
   author_agent: "Dual Cougar"
   user-invocable: "false"
   arguments: "check <pool-id> --address <addr> | compare <pool-id> --address <addr> | pools"
-  entry: "hodlmm-il-tracker/hodlmm-il-tracker.ts"
+  entry: "hodlmm-position-tracker/hodlmm-position-tracker.ts"
   requires: ""
   tags: "read-only, defi, l2, mainnet-only"
 ---
 
-# hodlmm-il-tracker
+# hodlmm-position-tracker
 
 **Know what your LP position actually costs you.**
 
@@ -30,7 +30,7 @@ Impermanent loss tracker for Bitflow HODLMM concentrated liquidity positions. Ev
 Current IL estimate for a position — range status, drift, concentration multiplier.
 
 ```bash
-bun hodlmm-il-tracker/hodlmm-il-tracker.ts check <pool-id> --address <stx-address>
+bun hodlmm-position-tracker/hodlmm-position-tracker.ts check <pool-id> --address <stx-address>
 ```
 
 Output includes:
@@ -44,7 +44,7 @@ Output includes:
 LP position value vs simply holding — the real cost of providing liquidity.
 
 ```bash
-bun hodlmm-il-tracker/hodlmm-il-tracker.ts compare <pool-id> --address <stx-address>
+bun hodlmm-position-tracker/hodlmm-position-tracker.ts compare <pool-id> --address <stx-address>
 ```
 
 Output includes:
@@ -58,7 +58,7 @@ Output includes:
 List active HODLMM pools with bin step and fee data.
 
 ```bash
-bun hodlmm-il-tracker/hodlmm-il-tracker.ts pools [--sbtc-only]
+bun hodlmm-position-tracker/hodlmm-position-tracker.ts pools [--sbtc-only]
 ```
 
 ## Technical notes

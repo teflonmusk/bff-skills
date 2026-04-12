@@ -1,4 +1,4 @@
-# hodlmm-il-tracker — Agent Instructions
+# hodlmm-position-tracker — Agent Instructions
 
 ## Prerequisites
 - No wallet unlock needed (read-only)

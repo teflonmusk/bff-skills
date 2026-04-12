@@ -1,20 +1,19 @@
 #!/usr/bin/env bun
 /**
- * hodlmm-il-tracker — Impermanent loss tracker for Bitflow HODLMM concentrated liquidity
+ * hodlmm-position-tracker — Impermanent loss tracker for Bitflow HODLMM concentrated liquidity
  *
  * Know what your LP position actually costs you.
  *
  * Usage:
- *   bun hodlmm-il-tracker/hodlmm-il-tracker.ts check <pool-id> --address <stx-address>
- *   bun hodlmm-il-tracker/hodlmm-il-tracker.ts compare <pool-id> --address <stx-address>
- *   bun hodlmm-il-tracker/hodlmm-il-tracker.ts pools
+ *   bun hodlmm-position-tracker/hodlmm-position-tracker.ts check <pool-id> --address <stx-address>
+ *   bun hodlmm-position-tracker/hodlmm-position-tracker.ts compare <pool-id> --address <stx-address>
+ *   bun hodlmm-position-tracker/hodlmm-position-tracker.ts pools
  */
 
 import { Command } from "commander";
 
 const HODLMM_API = "https://bff.bitflowapis.finance";
 const FETCH_TIMEOUT_MS = 20_000;
-const PRICE_SCALE = 1e8;
 
 async function fetchJson<T>(url: string): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -89,6 +88,8 @@ interface UserPositionResponse {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// HODLMM API returns raw bin prices scaled by 10^(yDecimals + 2).
+// The extra +2 is an API convention — price = rawPrice / 10^(decimals + 2).
 function binPrice(bin: { price?: string | null }, yDecimals: number): number {
   if (!bin.price) return 0;
   return parseFloat(bin.price) / Math.pow(10, yDecimals + 2);
@@ -116,11 +117,11 @@ function calculateConcentratedIL(
   }
 
   const inRange = currentPrice >= lowerBound && currentPrice <= upperBound;
-  const rangeWidth = upperBound / lowerBound;
 
-  // Concentrated IL amplification: narrower range = higher IL
-  // Multiplier approximation: full_range_width / position_range_width
-  const multiplier = Math.max(1, Math.sqrt(rangeWidth > 1 ? 100 / rangeWidth : 100));
+  // Standard concentrated liquidity IL amplification (Uniswap v3 derivation):
+  // multiplier = sqrt(P_upper / P_lower) / (sqrt(P_upper / P_lower) - 1)
+  const sqrtRange = Math.sqrt(upperBound / lowerBound);
+  const multiplier = sqrtRange > 1 ? sqrtRange / (sqrtRange - 1) : 1;
 
   const baseIL = calculateIL(currentPrice, entryPrice);
   const concentratedIL = Math.min(baseIL.ilPercent * multiplier, 100);
@@ -132,7 +133,7 @@ function calculateConcentratedIL(
 
 const program = new Command();
 program
-  .name("hodlmm-il-tracker")
+  .name("hodlmm-position-tracker")
   .description("Impermanent loss tracker for Bitflow HODLMM concentrated liquidity positions.")
   .version("1.0.0");
 
@@ -163,7 +164,7 @@ program
       }));
 
       out({
-        skill: "hodlmm-il-tracker",
+        skill: "hodlmm-position-tracker",
         command: "pools",
         active_pools: active.length,
         pools: summary,
@@ -192,7 +193,7 @@ program
 
       if (!userPosition.bins || userPosition.bins.length === 0) {
         out({
-          skill: "hodlmm-il-tracker",
+          skill: "hodlmm-position-tracker",
           command: "check",
           pool_id: poolId,
           address: opts.address,
@@ -252,7 +253,7 @@ program
       const xShare = totalValue > 0 ? (xNormalized * currentPrice / totalValue) * 100 : 50;
 
       out({
-        skill: "hodlmm-il-tracker",
+        skill: "hodlmm-position-tracker",
         command: "check",
         pool_id: poolId,
         pair: `${poolInfo.token_x_symbol ?? "X"}-${poolInfo.token_y_symbol ?? "Y"}`,
@@ -315,7 +316,7 @@ program
 
       if (!userPosition.bins || userPosition.bins.length === 0) {
         out({
-          skill: "hodlmm-il-tracker",
+          skill: "hodlmm-position-tracker",
           command: "compare",
           pool_id: poolId,
           address: opts.address,
@@ -343,19 +344,22 @@ program
       const yHuman = totalY / Math.pow(10, yDecimals);
       const lpValueInY = xHuman * currentPrice + yHuman;
 
-      // Estimate HODL value: if you had held the same initial assets
-      // Using position midpoint as entry price estimate
+      // Estimate entry price from position midpoint bin
       const userBinIds = userPosition.bins.map((b) => b.bin_id).sort((a, b) => a - b);
       const midBinId = Math.round((userBinIds[0] + userBinIds[userBinIds.length - 1]) / 2);
       const midBin = poolBins.bins.find((b) => b.bin_id === midBinId);
       const entryPrice = midBin ? binPrice(midBin, yDecimals) : currentPrice;
 
-      // At entry: assume 50/50 split of current total value at entry price
-      const initialValueInY = lpValueInY; // Approximate: same total deposited
+      // Reconstruct initial deposit using entry price (breaks circularity).
+      // At entry, a 50/50 LP deposit at entryPrice means:
+      //   initialX = totalValue / (2 * entryPrice)
+      //   initialY = totalValue / 2
+      // We derive totalValue at entry from current reserves valued at entry price:
+      const initialValueInY = xHuman * entryPrice + yHuman;
       const initialX = (initialValueInY / 2) / entryPrice;
       const initialY = initialValueInY / 2;
 
-      // HODL value at current price
+      // HODL value: what those initial assets would be worth at current price
       const hodlValueInY = initialX * currentPrice + initialY;
 
       // IL = difference between HODL and LP
@@ -371,7 +375,7 @@ program
       const tokenXSymbol = poolInfo.token_x_symbol ?? "X";
 
       out({
-        skill: "hodlmm-il-tracker",
+        skill: "hodlmm-position-tracker",
         command: "compare",
         pool_id: poolId,
         pair: `${tokenXSymbol}-${tokenYSymbol}`,
