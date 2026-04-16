@@ -1,10 +1,16 @@
+---
+name: hodlmm-position-tracker-agent
+skill: hodlmm-position-tracker
+description: "Impermanent loss tracker for Bitflow HODLMM concentrated liquidity. Calculates standard and concentrated IL, compares LP vs HODL value, tracks range drift and reserve imbalance."
+---
+
 # hodlmm-position-tracker — Agent Instructions
 
 ## Prerequisites
 - No wallet unlock needed (read-only)
 - Requires a Stacks address and HODLMM pool ID
 
-## Decision Logic
+## Decision order
 
 | Situation | Command |
 |-----------|---------|
@@ -17,6 +23,13 @@
 - After price moves to assess position health
 - When deciding whether to exit a pool — compare LP vs HODL
 - Regular portfolio review — is the LP position net positive after fees?
+
+## Guardrails
+
+- This skill is entirely read-only — it never unlocks a wallet or signs transactions
+- No funds are moved, no approvals are granted
+- Respect Bitflow API rate limits; avoid polling more than once per minute per pool
+- If the API returns an error or empty data, surface the error clearly rather than guessing values
 
 ## Output Handling
 - `impermanent_loss.concentrated_il_pct` is the key metric — includes range amplification

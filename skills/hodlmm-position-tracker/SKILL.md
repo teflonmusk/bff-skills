@@ -15,14 +15,23 @@ metadata:
 
 **Know what your LP position actually costs you.**
 
-Impermanent loss tracker for Bitflow HODLMM concentrated liquidity positions. Every LP knows fees are good — but is the IL eating more than you earn? This tool answers that.
+## What it does
 
-## Why it matters
+Impermanent loss tracker for Bitflow HODLMM concentrated liquidity positions. Every LP knows fees are good — but is the IL eating more than you earn? This tool answers that by calculating standard and concentrated IL, comparing LP vs HODL value, and tracking range drift and reserve imbalance.
+
+## Why agents need it
 
 - Concentrated liquidity amplifies IL compared to standard AMMs
 - HODLMM bins create tighter ranges that multiply price divergence losses
 - No existing AIBTC tool calculates IL for HODLMM positions
 - Agents deploying sBTC into LP pools need real-time IL visibility before rebalancing
+
+## Safety notes
+
+- Entirely read-only — no wallet unlock or signing required
+- No funds are moved or approvals granted
+- Uses only public Bitflow API endpoints
+- Safe to run on any schedule without side effects
 
 ## Commands
 
@@ -60,6 +69,14 @@ List active HODLMM pools with bin step and fee data.
 ```bash
 bun hodlmm-position-tracker/hodlmm-position-tracker.ts pools [--sbtc-only]
 ```
+
+## Output contract
+
+All commands return JSON with a top-level `status` field (`"ok"` or `"error"`).
+
+- **check**: `{ status, pool_id, position: { in_range, lower_bin, upper_bin, drift_bins }, impermanent_loss: { standard_il_pct, concentrated_il_pct, amplification_multiplier }, reserve_balance: { x_pct, y_pct }, risk_level }`
+- **compare**: `{ status, pool_id, lp_value, hodl_value, il_absolute, il_pct, fee_context: { fee_rate, breakeven_hint }, verdict }`
+- **pools**: `{ status, pools: [{ pool_id, pair, bin_step, fee_rate }] }`
 
 ## Technical notes
 
