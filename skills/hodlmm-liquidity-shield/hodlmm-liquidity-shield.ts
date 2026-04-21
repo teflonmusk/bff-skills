@@ -14,6 +14,7 @@
  */
 
 import { Command } from "commander";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ const BFF_API = "https://bff.bitflowapis.finance";
 const HIRO_API = "https://api.mainnet.hiro.so";
 const DEFAULT_MAX_IL = 5; // 5% max impermanent loss before exit trigger
 const DEFAULT_ALERT_IL = 3; // 3% alert threshold
-const PRICE_SCALE = 1e8;
+const SHIELD_DIR = `${process.env.HOME}/.bff/shields`;
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -55,6 +56,30 @@ interface ShieldStatus {
   reasoning: string;
 }
 
+interface ShieldState {
+  poolId: string;
+  address: string;
+  entryBinId: number;
+  armTimestamp: string;
+}
+
+// ── State persistence ─────────────────────────────────────────────────
+
+function shieldPath(poolId: string): string {
+  return `${SHIELD_DIR}/${poolId}.json`;
+}
+
+function saveShieldState(state: ShieldState): void {
+  mkdirSync(SHIELD_DIR, { recursive: true });
+  writeFileSync(shieldPath(state.poolId), JSON.stringify(state, null, 2));
+}
+
+function loadShieldState(poolId: string): ShieldState | null {
+  const p = shieldPath(poolId);
+  if (!existsSync(p)) return null;
+  return JSON.parse(readFileSync(p, "utf-8")) as ShieldState;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function fail(message: string): never {
@@ -86,9 +111,12 @@ function calculateStandardIL(priceRatio: number): number {
   return (2 * sqrtR) / (1 + priceRatio) - 1;
 }
 
-function calculateConcentratedIL(standardIL: number, binStep: number, rangeWidth: number): number {
+function calculateConcentratedIL(standardIL: number, _binStep: number, rangeWidth: number): number {
   // Concentrated IL = standardIL * concentrationMultiplier
   // Wider ranges = lower multiplier, tighter ranges = higher
+  // heuristic — this approximation assumes uniform liquidity across the range.
+  // Real calculation needs actual position upper/lower bin bounds to derive the
+  // true concentration factor. Replace once BFF API exposes position endpoint.
   const concentration = Math.max(1, 100 / Math.max(rangeWidth, 1));
   return standardIL * concentration;
 }
@@ -133,6 +161,14 @@ async function arm(
   const pool = await fetchJson<Pool>(`${BFF_API}/hodlmm/pools/${poolId}`);
   const currentPrice = binIdToPrice(pool.activeId, pool.binStep);
 
+  // Persist entry state so 'check' can reference it later
+  saveShieldState({
+    poolId,
+    address: opts.address,
+    entryBinId: pool.activeId,
+    armTimestamp: new Date().toISOString(),
+  });
+
   ok({
     shield: {
       status: "armed",
@@ -172,8 +208,22 @@ async function check(
   const binStep = pool.binStep;
   const currentPrice = binIdToPrice(currentBinId, binStep);
 
-  // Entry price — use provided entry bin or estimate from position midpoint
-  const entryBinId = parseInt(opts.entryBin || String(currentBinId), 10);
+  // Entry price — use CLI flag, persisted arm state, or fail with helpful message
+  let entryBinId: number;
+  if (opts.entryBin) {
+    entryBinId = parseInt(opts.entryBin, 10);
+  } else {
+    const saved = loadShieldState(poolId);
+    if (saved) {
+      entryBinId = saved.entryBinId;
+    } else {
+      fail(
+        `No entry bin found. Either run 'arm ${poolId}' first to capture entry price, ` +
+        `or pass --entry-bin <id> explicitly. Without an entry bin, IL calculation is meaningless ` +
+        `(would always compare current price to itself = 0% IL).`
+      );
+    }
+  }
   const entryPrice = binIdToPrice(entryBinId, binStep);
 
   // Calculate price change
@@ -183,8 +233,11 @@ async function check(
   // Calculate IL
   const standardIL = calculateStandardIL(priceRatio);
 
-  // Estimate range width from bin step (tighter step = narrower effective range)
-  const rangeWidth = binStep * 10; // Approximate range in basis points
+  // heuristic — replace with position.upperBinId/lowerBinId bounds when BFF API
+  // exposes position endpoint. binStep*10 is a rough estimate and will be wrong
+  // for arbitrary position widths. See SKILL.md Safety notes.
+  // TODO: does bff.bitflowapis.finance expose position data by address?
+  const rangeWidth = binStep * 10; // Approximate range in basis points (heuristic)
   const concentratedIL = calculateConcentratedIL(standardIL, binStep, rangeWidth);
 
   // Determine if position is still in range (simplified — checks if drift > rangeWidth)
@@ -290,6 +343,7 @@ async function simulate(
     const simPrice = currentPrice * (1 + s.move / 100);
     const priceRatio = simPrice / currentPrice;
     const stdIL = calculateStandardIL(priceRatio);
+    // heuristic — see check() comment re: position bounds
     const rangeWidth = binStep * 10;
     const concIL = calculateConcentratedIL(stdIL, binStep, rangeWidth);
     const wouldTrigger = Math.abs(concIL * 100) >= maxIL;
@@ -313,11 +367,15 @@ async function simulate(
       maxIL: `${maxIL}%`,
     },
     scenarios: results,
-    insight: `At ${maxIL}% max-IL threshold with bin step ${binStep}, your position can absorb a ${
-      results.find((r) => r.wouldTriggerExit)
-        ? `move of up to ~${Math.abs(parseFloat(results.find((r) => !r.wouldTriggerExit)?.priceMove || "0"))}% before exit triggers`
-        : `${priceMovePct}% move without triggering exit`
-    }.`,
+    insight: (() => {
+      const safeMoves = results.filter((r) => !r.wouldTriggerExit);
+      const maxSafeMove = safeMoves.length > 0
+        ? Math.max(...safeMoves.map((r) => Math.abs(parseFloat(r.priceMove))))
+        : 0;
+      return safeMoves.length < results.length
+        ? `At ${maxIL}% max-IL threshold with bin step ${binStep}, your position can absorb moves up to ~${maxSafeMove}% before exit triggers.`
+        : `At ${maxIL}% max-IL threshold with bin step ${binStep}, none of the simulated scenarios (up to ${Math.abs(priceMovePct * 2)}%) trigger exit.`;
+    })(),
   });
 }
 

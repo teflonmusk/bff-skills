@@ -37,6 +37,8 @@ Monitors HODLMM position health by tracking price drift from entry, calculating 
 - Default thresholds: alert at 3% IL, exit at 5% IL (configurable)
 - The shield accounts for bin step in its concentration multiplier — tighter steps = higher sensitivity
 - Always verify exit parameters before executing — the shield is advisory
+- **Range detection limitation**: Range width is estimated as `binStep * 10` — this is a heuristic that may be inaccurate for positions with non-standard widths. The concentration multiplier and in-range check both rely on this estimate. Accurate calculation requires actual position upper/lower bin bounds, which are not yet available from the BFF API. If your position has a custom width, pass `--entry-bin` and interpret the `inRange` flag conservatively.
+- **arm persists state** to `~/.bff/shields/<pool-id>.json`. If `check` cannot find persisted state, `--entry-bin` is required — without it, IL would always be 0 (comparing current price to itself).
 
 ## Commands
 
