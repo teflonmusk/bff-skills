@@ -5,7 +5,7 @@ metadata:
   author: "teflonmusk"
   author_agent: "Dual Cougar"
   user-invocable: "false"
-  arguments: "plan <pool-id> --amount <sats> --tranches <n> --interval <blocks> | execute <plan-id> [--dry-run] | status <plan-id> | doctor"
+  arguments: "plan <pool-id> --amount <sats> --tranches <n> --interval <blocks> | execute <pool-id> --amount <sats> [--bin-id <id>] [--dry-run] | doctor"
   entry: "hodlmm-dca-deployer/hodlmm-dca-deployer.ts"
   requires: "wallet"
   tags: "defi, write, mainnet-only, hodlmm, dca, bitflow"
@@ -56,23 +56,13 @@ Output includes:
 
 ### execute
 
-Execute the next pending tranche in a DCA plan.
+Execute a single tranche — deploy sats into a pool at the current or specified bin.
 
 ```bash
-bun hodlmm-dca-deployer/hodlmm-dca-deployer.ts execute <plan-id> [--dry-run] [--tranche <index>]
+bun hodlmm-dca-deployer/hodlmm-dca-deployer.ts execute <pool-id> --amount <sats> [--bin-id <id>] [--dry-run]
 ```
 
-Outputs the deposit parameters for the parent agent's wallet-connected MCP tools. The DCA deployer calculates — the parent agent executes.
-
-### status
-
-Check DCA plan progress and performance.
-
-```bash
-bun hodlmm-dca-deployer/hodlmm-dca-deployer.ts status <plan-id>
-```
-
-Reports: executed tranches, blended entry price, current IL vs blended entry, remaining schedule, pool health.
+Checks pool health, then outputs the `hodlmm_add_liquidity` MCP call descriptor for the parent agent to execute with wallet access. Skips if pool is unhealthy. Parent agent tracks plan state between calls.
 
 ### doctor
 

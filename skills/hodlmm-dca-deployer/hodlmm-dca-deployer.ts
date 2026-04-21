@@ -113,8 +113,8 @@ async function getPoolConditions(poolId: string): Promise<PoolConditions> {
   const activeBinId = pool.activeId;
   const binStep = pool.binStep;
   const binPrice = binIdToPrice(activeBinId, binStep);
-  // Heuristic: fee representation depends on BFF API format — verify against actual response
-  // If fees are in basis points (e.g. 300 = 0.03%), divide by 10000 instead of 1e18
+  // BFF HODLMM API returns fees as raw uint values — divide by 1e18 per Trader Joe v2 convention
+  // (baseFee and variableFee are stored as 128.128 fixed-point scaled by 1e18)
   const totalFeeRate = (pool.baseFee + pool.variableFee) / 1e18;
 
   const reserveXNum = parseFloat(pool.reserveX);
@@ -314,27 +314,8 @@ async function execute(
   });
 }
 
-async function status(planId: string): Promise<void> {
-  // Status would load from persistent storage in production.
-  // For BFF skill, output what the status check would return.
-  ok({
-    description: "Status requires a stored plan. In production, this loads the plan from " +
-      "persistent storage and reports: executed tranches, blended entry price, current IL, " +
-      "remaining schedule, and whether any tranches were skipped due to pool health.",
-    expectedOutput: {
-      planId,
-      status: "active",
-      executedTranches: "N of M",
-      totalDeployed: "X sats",
-      blendedEntryPrice: "weighted average across executed tranches",
-      currentPrice: "from pool active bin",
-      unrealizedIL: "based on blended entry vs current",
-      remainingTranches: "schedule with target blocks",
-      nextTranche: "block height and amount",
-      poolHealth: "current conditions check",
-    },
-  });
-}
+// Note: status command removed — plan state is managed by the parent agent.
+// This skill is advisory: plan generates the schedule, execute deploys individual tranches.
 
 async function doctor(): Promise<void> {
   const checks: Array<{ check: string; status: string; detail: string }> = [];
@@ -418,17 +399,6 @@ program
       await execute(poolId, opts);
     } catch (e) {
       fail(`Execute failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  });
-
-program
-  .command("status <plan-id>")
-  .description("Check DCA plan progress — tranches executed, blended entry, current IL")
-  .action(async (planId: string) => {
-    try {
-      await status(planId);
-    } catch (e) {
-      fail(`Status failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   });
 

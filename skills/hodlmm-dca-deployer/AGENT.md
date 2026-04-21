@@ -16,8 +16,7 @@ description: "DCA into Bitflow HODLMM concentrated liquidity. Splits deposits in
 | Situation | Command |
 |-----------|---------|
 | Agent wants to enter an LP position | `plan <pool-id> --amount <sats> --tranches 5` |
-| Ready to deploy next tranche | `execute <plan-id>` |
-| Check progress and blended IL | `status <plan-id>` |
+| Ready to deploy next tranche | `execute <pool-id> --amount <sats>` |
 | Verify API access and pool availability | `doctor` |
 | Agent unsure which pool | Run `doctor` first, then check pool data via HODLMM API |
 
