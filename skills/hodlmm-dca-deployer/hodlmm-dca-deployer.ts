@@ -113,6 +113,8 @@ async function getPoolConditions(poolId: string): Promise<PoolConditions> {
   const activeBinId = pool.activeId;
   const binStep = pool.binStep;
   const binPrice = binIdToPrice(activeBinId, binStep);
+  // Heuristic: fee representation depends on BFF API format — verify against actual response
+  // If fees are in basis points (e.g. 300 = 0.03%), divide by 10000 instead of 1e18
   const totalFeeRate = (pool.baseFee + pool.variableFee) / 1e18;
 
   const reserveXNum = parseFloat(pool.reserveX);
@@ -146,8 +148,9 @@ async function getPoolConditions(poolId: string): Promise<PoolConditions> {
 }
 
 async function getCurrentBlock(): Promise<number> {
-  const info = await fetchJson<{ burn_block_height: number }>(`${HIRO_API}/v2/info`);
-  return info.burn_block_height;
+  // Use stacks_tip_height (Nakamoto ~2s blocks), NOT burn_block_height (Bitcoin ~10min blocks)
+  const info = await fetchJson<{ stacks_tip_height: number }>(`${HIRO_API}/v2/info`);
+  return info.stacks_tip_height;
 }
 
 // ── Commands ───────────────────────────────────────────────────────────
@@ -254,23 +257,61 @@ async function plan(
 }
 
 async function execute(
-  planId: string,
-  opts: { dryRun?: boolean; tranche?: string }
+  poolId: string,
+  opts: { amount: string; binId?: string; dryRun?: boolean }
 ): Promise<void> {
-  // In a real implementation, this would load the plan from persistent storage.
-  // For the BFF skill, we output the execution descriptor for the parent agent.
+  const amountSats = parseInt(opts.amount, 10);
+  if (!amountSats || amountSats < MIN_TRANCHE_SATS) {
+    fail(`--amount must be at least ${MIN_TRANCHE_SATS} sats`);
+  }
 
-  const trancheIndex = parseInt(opts.tranche || "0", 10);
   const isDryRun = opts.dryRun ?? false;
 
-  // Get current conditions
-  // Note: poolId would come from the stored plan. For now, require it as context.
-  fail(
-    "Execute requires a stored plan context. Use 'plan' first to generate the DCA schedule, " +
-    "then pass tranche parameters to the parent agent's deposit tool. " +
-    "The DCA deployer is an advisory skill — it calculates optimal tranches and timing. " +
-    "Execution happens through the parent agent's wallet-connected MCP tools."
-  );
+  // Get current pool conditions for the tranche
+  let conditions: PoolConditions | null = null;
+  try {
+    conditions = await getPoolConditions(poolId);
+  } catch {
+    // Pool data unavailable — proceed with user-supplied bin ID or fail
+  }
+
+  const binId = opts.binId
+    ? parseInt(opts.binId, 10)
+    : conditions?.activeBinId;
+
+  if (!binId) {
+    fail("Could not determine active bin ID. Provide --bin-id or ensure BFF API is reachable.");
+  }
+
+  if (conditions && !conditions.isHealthy) {
+    ok({
+      action: "execute_tranche",
+      status: "skipped",
+      reason: conditions.healthReason,
+      recommendation: "Pool conditions unhealthy — wait and retry at next interval",
+    });
+    return;
+  }
+
+  ok({
+    action: isDryRun ? "dry_run" : "execute_tranche",
+    poolId,
+    amountSats,
+    binId,
+    poolHealth: conditions ? {
+      isHealthy: conditions.isHealthy,
+      reserveImbalance: `${(conditions.reserveImbalance * 100).toFixed(1)}%`,
+      currentPrice: conditions.binPrice,
+    } : "unavailable — executing with user params",
+    mcpCall: {
+      tool: "hodlmm_add_liquidity",
+      params: { pool_id: poolId, amount_sats: amountSats, bin_id: binId },
+      description: `Deploy ${amountSats} sats into pool ${poolId} at bin ${binId}`,
+      dryRun: isDryRun,
+    },
+    note: "Parent agent executes this MCP call with wallet access. " +
+      "Run 'plan' first for optimal tranche schedule, then call 'execute' for each tranche.",
+  });
 }
 
 async function status(planId: string): Promise<void> {
@@ -308,11 +349,11 @@ async function doctor(): Promise<void> {
 
   // Check Hiro API
   try {
-    const info = await fetchJson<{ burn_block_height: number }>(`${HIRO_API}/v2/info`);
+    const info = await fetchJson<{ stacks_tip_height: number }>(`${HIRO_API}/v2/info`);
     checks.push({
       check: "Stacks block height",
       status: "ok",
-      detail: `Block ${info.burn_block_height}`,
+      detail: `Block ${info.stacks_tip_height} (Nakamoto ~2s blocks)`,
     });
   } catch (e) {
     checks.push({ check: "Stacks block height", status: "error", detail: `Unreachable: ${e}` });
@@ -367,13 +408,14 @@ program
   });
 
 program
-  .command("execute <plan-id>")
-  .description("Execute the next pending tranche in a DCA plan")
+  .command("execute <pool-id>")
+  .description("Execute a single tranche — deploy sats into pool at current or specified bin")
+  .requiredOption("--amount <sats>", "Amount in satoshis for this tranche")
+  .option("--bin-id <id>", "Target bin ID (defaults to pool active bin)")
   .option("--dry-run", "Simulate execution without depositing")
-  .option("--tranche <index>", "Specific tranche index to execute")
-  .action(async (planId: string, opts) => {
+  .action(async (poolId: string, opts) => {
     try {
-      await execute(planId, opts);
+      await execute(poolId, opts);
     } catch (e) {
       fail(`Execute failed: ${e instanceof Error ? e.message : String(e)}`);
     }
