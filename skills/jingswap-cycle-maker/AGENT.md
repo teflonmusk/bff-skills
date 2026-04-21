@@ -46,7 +46,7 @@ description: "Automated market making on JingSwap sBTC batch auctions. Orchestra
 
 ## Guardrails
 
-- Never deposit more than 10% of wallet balance into a single cycle
+- Never deposit more than 10% of wallet balance into a single cycle (advisory — parent agent must enforce)
 - Check oracle vs DEX price divergence before depositing — abort if >2%
 - Do not force-close deposits if only one side meets minimums — the cycle will fail
 - Always verify settlement results with `jingswap_get_settlement` after settling

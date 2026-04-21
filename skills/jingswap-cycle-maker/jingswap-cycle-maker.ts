@@ -25,49 +25,6 @@ const HIRO_API = "https://api.mainnet.hiro.so";
 const DEPOSIT_MIN_BLOCKS = 150;
 const BUFFER_BLOCKS = 30;
 const CANCEL_THRESHOLD = 500;
-const PHASE_NAMES = ["deposit", "buffer", "settle"] as const;
-
-// ── Types ──────────────────────────────────────────────────────────────
-
-interface CycleState {
-  currentCycle: number;
-  phase: number;
-  cycleStartBlock: number;
-  blocksElapsed: number;
-  depositsClosedBlock: number | null;
-  minDeposits: { minStx: number; minSbtc: number };
-  cycleTotals: { totalStx: number; totalSbtc: number };
-  market: string;
-}
-
-interface PriceData {
-  market: string;
-  pyth: {
-    btcUsd: { price: number; confidence: number };
-    stxUsd: { price: number; confidence: number };
-  };
-  dex: {
-    xykStxPerBtc: number;
-    dlmmStxPerBtc: number;
-  };
-}
-
-interface Opportunity {
-  market: string;
-  cycle: number;
-  phase: string;
-  imbalance: "sbtc_needed" | "stx_needed" | "balanced" | "empty";
-  totalStx: number;
-  totalSbtc: number;
-  oracleStxPerBtc: number;
-  dexStxPerBtc: number;
-  priceDivergence: number;
-  canClose: boolean;
-  canSettle: boolean;
-  recommendation: string;
-  action: Record<string, unknown> | null;
-}
-
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function fail(message: string): never {
@@ -83,22 +40,6 @@ async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
   return res.json() as Promise<T>;
-}
-
-function microStxToStx(micro: number): number {
-  return micro / 1_000_000;
-}
-
-function satsToBtc(sats: number): number {
-  return sats / 100_000_000;
-}
-
-function analyzeImbalance(state: CycleState): "sbtc_needed" | "stx_needed" | "balanced" | "empty" {
-  const { totalStx, totalSbtc } = state.cycleTotals;
-  if (totalStx === 0 && totalSbtc === 0) return "empty";
-  if (totalSbtc === 0 && totalStx > 0) return "sbtc_needed";
-  if (totalStx === 0 && totalSbtc > 0) return "stx_needed";
-  return "balanced";
 }
 
 // ── Commands ───────────────────────────────────────────────────────────
@@ -183,9 +124,10 @@ async function deposit(opts: { side: string; amount: string; market: string }): 
       }
     : {
         tool: "jingswap_deposit_stx",
-        params: { amount, market },
-        description: `Deposit ${amount} STX into cycle on ${market} market`,
-        preCheck: "Verify phase=0 (deposit) via jingswap_get_cycle_state first",
+        // Convert whole STX to micro-STX (1 STX = 1,000,000 micro-STX) — Stacks contracts expect micro-STX
+        params: { amount: Math.round(amount * 1_000_000), market },
+        description: `Deposit ${amount} STX (${Math.round(amount * 1_000_000)} micro-STX) into cycle on ${market} market`,
+        preCheck: "Verify phase=0 (deposit) AND check oracle vs DEX price divergence <2% via jingswap_get_prices first",
       };
 
   ok({
@@ -304,7 +246,8 @@ async function auto(opts: { side: string; amount: string; market: string }): Pro
         step: 3,
         action: "deposit",
         tool: side === "sbtc" ? "jingswap_deposit_sbtc" : "jingswap_deposit_stx",
-        params: side === "sbtc" ? { amount: Math.floor(amount), market } : { amount, market },
+        // sBTC in sats, STX converted to micro-STX (1 STX = 1,000,000 micro-STX)
+        params: side === "sbtc" ? { amount: Math.floor(amount), market } : { amount: Math.round(amount * 1_000_000), market },
         condition: "Only if phase=0 (deposit phase)",
       },
       {
@@ -367,8 +310,8 @@ async function history(opts: { market: string; cycles: string }): Promise<void> 
     market,
     execute: {
       tool: "jingswap_get_cycles_history",
-      params: { market },
-      description: `Fetch full cycle history for ${market} market`,
+      params: { market, count: cycleCount },
+      description: `Fetch last ${cycleCount} cycles for ${market} market`,
     },
     analysis: {
       description: `After fetching, analyze the last ${cycleCount} cycles for:`,
