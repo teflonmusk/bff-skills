@@ -48,6 +48,14 @@ description: "Stream sats continuously to any .btc name. Payroll, subscriptions,
 - Recommend claiming weekly for regular streams, daily for high-flow streams
 - Unclaimed sats keep accruing — nothing is lost by waiting
 
+### Claim flow (3-step)
+
+1. `claim <stream-id>` — returns transfer instructions + claimable amount. Does NOT update state.
+2. Parent agent executes `lookup_bns_name` + `sbtc_transfer` with the returned params.
+3. `ack-claim <stream-id> --sats <n>` — confirms transfer succeeded, updates accounting.
+
+If step 2 fails (bad BNS resolution, insufficient balance, network error), skip step 3. No sats are marked as claimed until ack-claim succeeds.
+
 ## Guardrails
 
 - Never create a stream larger than sender's current sBTC balance (advisory — parent agent must verify)

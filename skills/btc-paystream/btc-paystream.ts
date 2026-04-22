@@ -21,7 +21,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 
 
 const HIRO_API = "https://api.mainnet.hiro.so";
 const STREAMS_DIR = `${process.env.HOME}/.bff/streams`;
-const BLOCKS_PER_DAY = 43_200; // ~2s blocks on Nakamoto
+const BLOCKS_PER_DAY = 86_400; // Nakamoto target: 1 block/second
 const MIN_FLOW_RATE = 100; // sats/day — below this, gas costs exceed value
 const MIN_STREAM_SATS = 1_000;
 
@@ -264,16 +264,47 @@ async function claim(streamId: string): Promise<void> {
         params: { amount: claimable, recipient: `resolved_address_of_${stream.toBns}` },
         description: `Transfer ${satsDisplay(claimable)} to ${stream.toBns}`,
       },
+      step3: {
+        tool: "btc-paystream",
+        command: `ack-claim ${stream.id} --sats ${claimable}`,
+        description: "Confirm transfer succeeded — updates accounting",
+      },
     },
-    postClaim: {
-      description: "After successful transfer, update stream claimed amount",
-      newClaimed: stream.claimed + claimable,
+    note: "State is NOT updated until ack-claim is called. Parent agent must call ack-claim after confirmed transfer.",
+  });
+}
+
+async function ackClaim(streamId: string, opts: { sats: string }): Promise<void> {
+  const stream = loadStream(streamId);
+  if (!stream) {
+    fail(`Stream ${streamId} not found.`);
+  }
+
+  const sats = parseInt(opts.sats, 10);
+  if (!sats || sats <= 0) {
+    fail("Sats amount must be a positive integer.");
+  }
+
+  const currentBlock = await getCurrentBlock();
+  const accrued = calculateAccrued(stream, currentBlock);
+  const maxClaimable = accrued - stream.claimed;
+
+  if (sats > maxClaimable) {
+    fail(`Cannot acknowledge ${sats} sats — only ${maxClaimable} are claimable. Possible double-ack.`);
+  }
+
+  stream.claimed += sats;
+  saveStream(stream);
+
+  ok({
+    ackClaim: {
+      streamId: stream.id,
+      acknowledged: satsDisplay(sats),
+      totalClaimed: satsDisplay(stream.claimed),
+      remaining: satsDisplay(stream.totalSats - stream.claimed),
+      status: "accounting_updated",
     },
   });
-
-  // Update claimed amount
-  stream.claimed += claimable;
-  saveStream(stream);
 }
 
 async function cancel(streamId: string): Promise<void> {
@@ -351,7 +382,7 @@ async function doctor(): Promise<void> {
 
   try {
     const info = await fetchJson<{ stacks_tip_height: number }>(`${HIRO_API}/v2/info`);
-    checks.push({ check: "Stacks network", status: "ok", detail: `Block ${info.stacks_tip_height} (~2s Nakamoto blocks)` });
+    checks.push({ check: "Stacks network", status: "ok", detail: `Block ${info.stacks_tip_height} (~1s Nakamoto blocks)` });
   } catch {
     checks.push({ check: "Stacks network", status: "error", detail: "Unreachable" });
   }
@@ -362,7 +393,7 @@ async function doctor(): Promise<void> {
   checks.push({ check: "BNS resolver", status: "info", detail: "Resolve .btc names to Stacks addresses via lookup_bns_name" });
   checks.push({ check: "Transfer method", status: "info", detail: "Claims execute via sbtc_transfer — parent agent handles wallet" });
   checks.push({ check: "Flow rate minimum", status: "info", detail: `${MIN_FLOW_RATE} sats/day — below this, gas costs may exceed value` });
-  checks.push({ check: "Block time", status: "info", detail: `${BLOCKS_PER_DAY.toLocaleString()} blocks/day (~2s each on Nakamoto)` });
+  checks.push({ check: "Block time", status: "info", detail: `${BLOCKS_PER_DAY.toLocaleString()} blocks/day (~1s each on Nakamoto)` });
 
   ok({
     healthy: checks.every((c) => c.status !== "error"),
@@ -400,6 +431,14 @@ program
   .description("Claim accrued sats from a stream")
   .action(async (streamId: string) => {
     try { await claim(streamId); } catch (e) { fail(`Claim failed: ${e instanceof Error ? e.message : String(e)}`); }
+  });
+
+program
+  .command("ack-claim <stream-id>")
+  .description("Confirm a claim transfer succeeded — updates accounting")
+  .requiredOption("--sats <amount>", "Number of sats that were successfully transferred")
+  .action(async (streamId: string, opts: { sats: string }) => {
+    try { await ackClaim(streamId, opts); } catch (e) { fail(`Ack-claim failed: ${e instanceof Error ? e.message : String(e)}`); }
   });
 
 program

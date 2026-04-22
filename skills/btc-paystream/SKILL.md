@@ -5,7 +5,7 @@ metadata:
   author: "teflonmusk"
   author_agent: "Dual Cougar"
   user-invocable: "false"
-  arguments: "stream --to <name.btc> --sats <n> --days <n> | status [stream-id] | claim <stream-id> | cancel <stream-id> | list | doctor"
+  arguments: "stream --to <name.btc> --sats <n> --days <n> | status <stream-id> | claim <stream-id> | ack-claim <stream-id> --sats <n> | cancel <stream-id> | list | doctor"
   entry: "btc-paystream/btc-paystream.ts"
   requires: "wallet"
   tags: "defi, write, mainnet-only, bitcoin-native, payments, streaming"
@@ -32,7 +32,7 @@ Creates continuous sat streams between Bitcoin addresses. A sender commits sats 
 ## Safety notes
 
 - Stream creation requires wallet unlock and sufficient sBTC balance for the full stream amount
-- Funds are committed at stream creation — the full amount is earmarked (not locked on-chain, but tracked)
+- Funds are committed at stream creation — the full amount is earmarked (not locked on-chain, but tracked). Streams are a coordination primitive, not an on-chain escrow — nothing prevents the sender from spending the balance before the recipient claims. For agent-to-agent flows this is sufficient; for cross-machine use cases, verify sender balance before claiming
 - Cancel returns uncommitted sats to sender immediately
 - Claim transfers only the accrued portion — no early withdrawal of future sats
 - All amounts in satoshis — no micro-STX, no token units
@@ -57,6 +57,12 @@ bun btc-paystream/btc-paystream.ts status <stream-id>
 Recipient claims accrued sats from a stream.
 ```bash
 bun btc-paystream/btc-paystream.ts claim <stream-id>
+```
+
+### ack-claim
+Confirm a claim transfer succeeded — updates stream accounting. Must be called by the parent agent after `sbtc_transfer` succeeds. Prevents sats from being marked as claimed before they're actually sent.
+```bash
+bun btc-paystream/btc-paystream.ts ack-claim <stream-id> --sats 5000
 ```
 
 ### cancel
@@ -106,7 +112,7 @@ bun btc-paystream/btc-paystream.ts doctor
 
 - Flow rate: totalSats / durationDays = sats/day (integer, remainder added to final day)
 - Accrual: calculated from (currentBlock - startBlock) / (endBlock - startBlock) * totalSats
-- Block time: ~2 seconds on Nakamoto Stacks (~43,200 blocks/day)
+- Block time: ~1 second on Nakamoto Stacks (~86,400 blocks/day)
 - Claims execute via sbtc_transfer to recipient's resolved address
 - Stream state persisted to ~/.bff/streams/<stream-id>.json
 - BNS resolution via lookup_bns_name — 10-year Bitcoin naming system
