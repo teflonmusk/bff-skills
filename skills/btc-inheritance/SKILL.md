@@ -15,7 +15,9 @@ metadata:
 
 **Dead man's switch for your Bitcoin. Check in or your sats go home.**
 
-Self-custody means no one can take your Bitcoin. It also means no one can recover it if something happens to you. This skill solves that: set beneficiaries, check in regularly, and if you stop checking in, your sats transfer automatically to the people you choose. No lawyers, no trusts, no third parties. Just Bitcoin and a timer.
+Self-custody means no one can take your Bitcoin. It also means no one can recover it if something happens to you. This skill solves that: set beneficiaries, check in regularly, and if you stop checking in, your sats transfer to the people you choose. No lawyers, no trusts, no third parties. Just Bitcoin and a timer.
+
+**Execution model:** This is an agent-monitored coordination primitive, not an on-chain escrow. The parent agent must be running to detect expired deadlines and execute distribution. If the agent's machine is lost or the agent stops running, the timer is not autonomously enforced. Back up `plan.json` and ensure your agent has a monitoring loop (sensor or periodic `status` check) that calls `trigger` when the deadline expires. A future version may use a Clarity timelock contract for fully autonomous enforcement.
 
 ## What it does
 
@@ -68,9 +70,10 @@ bun btc-inheritance/btc-inheritance.ts update --beneficiaries family.btc,friend.
 ```
 
 ### trigger
-Manually trigger distribution — for testing or voluntary transfer.
+Trigger distribution. Requires expired deadline by default. Use `--force` for voluntary distribution before deadline.
 ```bash
 bun btc-inheritance/btc-inheritance.ts trigger
+bun btc-inheritance/btc-inheritance.ts trigger --force
 ```
 
 ### doctor
@@ -103,7 +106,7 @@ bun btc-inheritance/btc-inheritance.ts doctor
 ## Technical notes
 
 - Check-in interval: minimum 7 days, recommended 30-90 days
-- Deadline calculated from last check-in block + (intervalDays × 43,200 blocks/day)
+- Deadline calculated from last check-in block + (intervalDays × 86,400 blocks/day, Nakamoto 1s target)
 - Distribution uses sbtc_transfer to each beneficiary's resolved address
 - BNS resolution at trigger time — if a name doesn't resolve, that share is held (not lost)
 - Split percentages are integers summing to 100 — remainder sats go to first beneficiary

@@ -22,7 +22,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 const HIRO_API = "https://api.mainnet.hiro.so";
 const PLAN_DIR = `${process.env.HOME}/.bff/inheritance`;
 const PLAN_FILE = `${PLAN_DIR}/plan.json`;
-const BLOCKS_PER_DAY = 43_200;
+const BLOCKS_PER_DAY = 86_400; // Nakamoto target: 1 block/second
 const MIN_INTERVAL_DAYS = 7;
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ async function setup(opts: { beneficiaries: string; split: string; days: string 
 
   const existing = loadPlan();
   if (existing) {
-    // Warn about overwrite but proceed — single plan per wallet
+    console.error(`WARNING: Overwriting existing plan with ${existing.beneficiaries.length} beneficiaries (${existing.intervalDays}-day interval). Previous plan will be lost.`);
   }
 
   const plan: InheritancePlan = {
@@ -241,16 +241,27 @@ async function update(opts: { beneficiaries: string; split: string }): Promise<v
   });
 }
 
-async function trigger(): Promise<void> {
+async function trigger(opts: { force?: boolean }): Promise<void> {
   const plan = loadPlan();
   if (!plan) {
     fail("No inheritance plan found. Run 'setup' first.");
   }
 
+  const currentBlock = await getCurrentBlock();
+  const isExpired = currentBlock >= plan.deadlineBlock;
+
+  if (!isExpired && !opts.force) {
+    const daysRemaining = Math.max(0, Math.floor((plan.deadlineBlock - currentBlock) / BLOCKS_PER_DAY));
+    fail(`Deadline has not passed (${daysRemaining} days remaining). Use --force for voluntary distribution.`);
+  }
+
   ok({
     trigger: {
       status: "distribution_ready",
-      description: "Generating transfer commands for all beneficiaries.",
+      description: isExpired
+        ? "Deadline expired. Generating transfer commands for all beneficiaries."
+        : "Voluntary distribution (--force). Generating transfer commands for all beneficiaries.",
+      deadlineExpired: isExpired,
     },
     pipeline: [
       {
@@ -287,7 +298,7 @@ async function doctor(): Promise<void> {
 
   try {
     const info = await fetchJson<{ stacks_tip_height: number }>(`${HIRO_API}/v2/info`);
-    checks.push({ check: "Stacks network", status: "ok", detail: `Block ${info.stacks_tip_height} (~2s Nakamoto blocks)` });
+    checks.push({ check: "Stacks network", status: "ok", detail: `Block ${info.stacks_tip_height} (~1s Nakamoto blocks)` });
   } catch {
     checks.push({ check: "Stacks network", status: "error", detail: "Unreachable" });
   }
@@ -357,9 +368,10 @@ program
 
 program
   .command("trigger")
-  .description("Manually trigger distribution — irreversible")
-  .action(async () => {
-    try { await trigger(); } catch (e) { fail(`Trigger failed: ${e instanceof Error ? e.message : String(e)}`); }
+  .description("Trigger distribution — requires expired deadline or --force for voluntary")
+  .option("--force", "Force distribution even if deadline hasn't passed")
+  .action(async (opts) => {
+    try { await trigger(opts); } catch (e) { fail(`Trigger failed: ${e instanceof Error ? e.message : String(e)}`); }
   });
 
 program
