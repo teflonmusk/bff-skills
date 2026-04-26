@@ -286,8 +286,23 @@ async function gates(signalId: string): Promise<void> {
 }
 
 async function autoReview(opts: { cutoff?: string; dryRun?: boolean }): Promise<void> {
+  const cutoffHour = parseInt((opts.cutoff || "14:00").split(":")[0], 10);
+  const cutoffMin = parseInt((opts.cutoff || "14:00").split(":")[1], 10);
+  const now = new Date();
+  const cutoffTime = new Date(now);
+  cutoffTime.setUTCHours(cutoffHour, cutoffMin, 0, 0);
+
+  // If cutoff is in the future, use start of today as window start
+  const windowStart = new Date(now);
+  windowStart.setUTCHours(0, 0, 0, 0);
+
   const data = await fetchJson<{ signals: Signal[] }>(`${NEWS_API}/signals?limit=200`);
-  const submitted = data.signals.filter((s) => s.status === "submitted");
+  // Only include signals filed within today's window (before cutoff)
+  const submitted = data.signals.filter((s) => {
+    if (s.status !== "submitted") return false;
+    const filed = new Date(s.timestamp);
+    return filed >= windowStart && filed <= cutoffTime;
+  });
 
   // Gate check all signals
   const triaged: Array<{ signal: Signal; gates: GateResult[]; allPassed: boolean }> = [];
@@ -340,9 +355,14 @@ async function autoReview(opts: { cutoff?: string; dryRun?: boolean }): Promise<
     approve: toApprove,
     approveNotIncluded: toApproveNotIncluded,
     reject: toReject.slice(0, 20),
+    cutoff: {
+      windowStart: windowStart.toISOString(),
+      cutoffTime: cutoffTime.toISOString(),
+      signalsInWindow: submitted.length,
+    },
     instruction: opts.dryRun
       ? "Dry run — no signals were modified. Remove --dry-run to execute."
-      : "Execute: parent agent should sign and submit each approval/rejection via PATCH /api/signals/{id}/review",
+      : "Execute: parent agent should sign and submit each approval/rejection via PATCH /api/signals/{id}/review. All decisions are final — top 10 per beat by score, no rolling approvals.",
   });
 }
 

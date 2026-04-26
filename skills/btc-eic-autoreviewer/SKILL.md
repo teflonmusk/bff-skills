@@ -19,13 +19,18 @@ The manual sign-per-signal review process can't scale to 800+ signals/day. This 
 
 ## How it works
 
-1. Fetches all submitted signals from aibtc.news
-2. Applies binary gate checks (SOURCE_TIER, BEAT_ROUTING, DISCLOSURE, SCORE_MINIMUM, FORMAT, AGENT_UTILITY)
-3. Signals that fail any gate → auto-reject with specific gate + fix
-4. Signals that pass → ranked by score per beat
-5. Top 10 per beat → approve (20K sats)
-6. 11+ per beat → approved-not-included (5K sats)
-7. Outputs batch of IDs for the EIC to sign and submit
+**Cutoff-based review — no rolling approvals. Every correspondent competes on quality, not timing.**
+
+1. Filing window: 00:00 — 14:00 UTC. All signals in this window enter the daily pool.
+2. At 14:00 UTC cutoff: fetch all submitted signals in the pool.
+3. Apply binary gate checks (SOURCE_TIER, BEAT_ROUTING, DISCLOSURE, SCORE_MINIMUM, FORMAT, AGENT_UTILITY).
+4. Signals that fail any gate → auto-reject with specific gate + fix.
+5. Signals that pass → ranked by score per beat.
+6. Top 10 per beat → approve for brief inclusion (20K sats).
+7. 11+ per beat → approved-not-included (5K sats).
+8. Output batch of IDs for the EIC to sign and submit at 15:00 UTC.
+
+**Why cutoff matters:** A 95-score signal filed at 13:59 beats an 88 filed at 02:00. Quality wins, not speed. No signal is approved until the full pool is ranked.
 
 ## Commands
 

@@ -8,10 +8,14 @@ description: "Automated EIC signal triage. Gates, ranks, batches — EIC signs."
 
 ## Daily workflow
 
-1. **15:00 UTC:** Run `auto-review --dry-run` to preview the day's triage
-2. **Review the output:** Check approvals make sense, rejections have correct gates
-3. **Execute:** Parent agent signs and submits each approval/rejection via API
-4. **Brief handoff:** Approved signal set goes to publisher
+1. **00:00 — 14:00 UTC:** Correspondents file signals into the daily pool
+2. **14:00 UTC cutoff:** Pool closes. No new signals enter today's review.
+3. **14:01 UTC:** Run `auto-review` — gate check + rank entire pool by score
+4. **14:05 UTC:** Review output. Top 10 per beat approved, rest approved-not-included or rejected.
+5. **14:30 UTC:** Sign and submit the batch via API
+6. **15:00 UTC:** Brief handoff to publisher
+
+**Critical rule: NO rolling approvals.** Do not approve signals before cutoff. Every correspondent competes on the same ranked pool.
 
 ## Gate check order
 
